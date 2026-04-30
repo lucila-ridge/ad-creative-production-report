@@ -2104,7 +2104,9 @@ const LineChartWithTooltip = ({
     strokeWidth: "1.5",
     strokeDasharray: "4,3"
   }), activeCats.map(cat => {
-    const pts = data.map((m, i) => [px(i), py(m[cat] || 0, LINE_H)]);
+    // Build path only through months that have data — future months break the line
+    // so it doesn't drop to zero past the latest month with real numbers.
+    const pts = data.map((m, i) => m.isFuture ? null : [px(i), py(m[cat] || 0, LINE_H)]).filter(Boolean);
     return /*#__PURE__*/React.createElement("g", {
       key: cat
     }, /*#__PURE__*/React.createElement("path", {
@@ -2118,7 +2120,7 @@ const LineChartWithTooltip = ({
         opacity: hoverIdx !== null ? 0.7 : 1,
         transition: "opacity 0.15s"
       }
-    }), /*#__PURE__*/React.createElement("circle", {
+    }), !data[activeIdx]?.isFuture && /*#__PURE__*/React.createElement("circle", {
       cx: px(activeIdx),
       cy: py(data[activeIdx]?.[cat] || 0, LINE_H),
       r: hoverIdx !== null ? 5 : 4,
@@ -2147,6 +2149,7 @@ const LineChartWithTooltip = ({
     const monthName = parts[0] || m.month;
     const yearPart = parts[1] || '';
     const isActive = i === activeIdx;
+    const isFut = m.isFuture;
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
@@ -2156,7 +2159,8 @@ const LineChartWithTooltip = ({
         color: isActive ? R.black : R.shale,
         fontWeight: isActive ? 700 : 400,
         transition: "color 0.1s",
-        lineHeight: 1.1
+        lineHeight: 1.1,
+        opacity: isFut ? 0.4 : 1
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2326,7 +2330,7 @@ const CreativeProduction = ({
         color: R.shale,
         fontFamily: "'Barlow', sans-serif"
       }
-    }, isYoY ? "12 months · this year vs last year" : "Stacked by format — 12 months")), /*#__PURE__*/React.createElement("div", {
+    }, isYoY ? `${data.currentYear || ""} vs ${(data.currentYear || 0) - 1} — Jan to Dec` : "Stacked by format — calendar year")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         background: R.surfaceAlt,
@@ -2391,14 +2395,17 @@ const CreativeProduction = ({
     }, monthlyStacked.map((m, i) => {
       const isActive = m.month === selectedMonth;
       const isEmpty = m.noData;
+      const isFuture = m.isFuture;
+      // Future months render with low opacity to make YTD progress legible.
+      const groupOpacity = isFuture ? 0.25 : isActive ? 1 : isYoY ? 0.55 : 0.45;
       if (isYoY) {
-        const curTotal = m.total || 0;
+        const curTotal = isFuture ? 0 : m.total || 0;
         const prevTotal = PREV_YEAR_TOTALS[m.month] || 0;
         const curH = curTotal / activeMax * CHART_H;
         const prevH = prevTotal / activeMax * CHART_H;
-        const yoyPct = prevTotal > 0 ? Math.round((curTotal - prevTotal) / prevTotal * 100) : null;
+        const yoyPct = prevTotal > 0 && curTotal > 0 ? Math.round((curTotal - prevTotal) / prevTotal * 100) : null;
         const direction = yoyPct === null ? "" : yoyPct > 0 ? "increase" : yoyPct < 0 ? "decrease" : "no change";
-        const tooltipText = yoyPct === null ? `${m.month}: no prior-year data` : `${m.month} · YoY ${direction}: ${yoyPct > 0 ? "+" : ""}${yoyPct}% (${prevTotal} → ${curTotal})`;
+        const tooltipText = isFuture ? `${m.month}: not yet` : yoyPct === null ? `${m.month}: no prior-year data` : `${m.month} · YoY ${direction}: ${yoyPct > 0 ? "+" : ""}${yoyPct}% (${prevTotal} → ${curTotal})`;
         return /*#__PURE__*/React.createElement("div", {
           key: i,
           title: tooltipText,
@@ -2409,7 +2416,7 @@ const CreativeProduction = ({
             alignItems: "stretch",
             justifyContent: "flex-end",
             height: CHART_H,
-            opacity: isEmpty ? 0.25 : isActive ? 1 : 0.55,
+            opacity: groupOpacity,
             transition: "opacity 0.2s",
             cursor: "help"
           }
@@ -2437,7 +2444,7 @@ const CreativeProduction = ({
         })), /*#__PURE__*/React.createElement("div", {
           style: {
             fontSize: 9,
-            color: isEmpty ? R.border : isActive ? R.black : R.shale,
+            color: isFuture ? R.textMuted : isActive ? R.black : R.shale,
             fontFamily: "'Barlow', sans-serif",
             textAlign: "center",
             marginTop: 6,
@@ -2469,10 +2476,10 @@ const CreativeProduction = ({
           alignItems: "stretch",
           justifyContent: "flex-end",
           height: CHART_H,
-          opacity: isEmpty ? 0.25 : isActive ? 1 : 0.45,
+          opacity: groupOpacity,
           transition: "opacity 0.2s"
         }
-      }, isEmpty ? /*#__PURE__*/React.createElement("div", {
+      }, isFuture || isEmpty ? /*#__PURE__*/React.createElement("div", {
         style: {
           height: 3,
           background: R.border,
@@ -2492,7 +2499,7 @@ const CreativeProduction = ({
       })), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 9,
-          color: isEmpty ? R.border : isActive ? R.black : R.shale,
+          color: isFuture ? R.textMuted : isActive ? R.black : R.shale,
           fontFamily: "'Barlow', sans-serif",
           textAlign: "center",
           marginTop: 6,
@@ -2520,24 +2527,10 @@ const CreativeProduction = ({
       if (!isYoY) {
         return [["Video", "#4A7C59"], ["Image", "#7B9EC7"]];
       }
-      // Build explicit date-range labels so users can see the window cleanly.
-      // E.g. for May '25 → Apr '26, prior series is May '24 → Apr '25.
-      const months = MONTHLY_HISTORY_FULL.map(m => m.month).filter(Boolean);
-      if (!months.length) return [["Last period", "#B8B4AA"], ["This period", "#C45220"]];
-      const first = months[0],
-        last = months[months.length - 1];
-      const shiftYearLabel = (label, delta) => {
-        // "May '25" → "May '24" (delta = -1)
-        const parts = label.split(" '");
-        if (parts.length !== 2) return label;
-        const yy = parseInt(parts[1], 10);
-        if (isNaN(yy)) return label;
-        const newYY = String((yy + delta + 100) % 100).padStart(2, "0");
-        return `${parts[0]} '${newYY}`;
-      };
-      const curRange = `${first}–${last}`;
-      const prevRange = `${shiftYearLabel(first, -1)}–${shiftYearLabel(last, -1)}`;
-      return [[prevRange, "#B8B4AA"], [curRange, "#C45220"]];
+      // Window is now Jan–Dec of the current year, so a single year label
+      // is unambiguous for each series.
+      const cy = data && data.currentYear ? data.currentYear : 2026;
+      return [[String(cy - 1), "#B8B4AA"], [String(cy), "#C45220"]];
     })().map(([l, c]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
@@ -4275,15 +4268,23 @@ function normalizeCreative(row) {
 function computeAggregates(creatives) {
   const valid = (creatives || []).filter(Boolean);
 
-  // Latest 12 months in the data
-  const monthsAll = [...new Set(valid.map(c => c.month))].sort((a, b) => monthIndex(a) - monthIndex(b));
-  const window12 = monthsAll.slice(-12);
+  // Find the latest month with data → that defines the "current" calendar year.
+  // The window is always Jan-Dec of that year. Months past the latest data point
+  // are flagged isFuture so charts can render them with low opacity.
+  const monthsWithData = [...new Set(valid.map(c => c.month))].sort((a, b) => monthIndex(a) - monthIndex(b));
+  const latestMonthLabel = monthsWithData[monthsWithData.length - 1] || `Jan '${String(new Date().getFullYear()).slice(-2)}`;
+  const latestIdx = monthIndex(latestMonthLabel);
+  const currentYY = parseInt(latestMonthLabel.split(" '")[1], 10);
+  const yyStr = String(currentYY).padStart(2, "0");
+  const window12 = MONTH_ABBR.map(mname => `${mname} '${yyStr}`);
+  const isFuture = label => monthIndex(label) > latestIdx;
   const knownCats = ["EDC", "Tech", "Jewelry", "Travel", "Gut-Culture"];
   const cats = knownCats.filter(c => valid.some(v => v.category === c));
   const countBy = (rows, predicate) => rows.filter(predicate).length;
   const MONTHLY_BY_CAT = window12.map(month => {
     const row = {
-      month
+      month,
+      isFuture: isFuture(month)
     };
     cats.forEach(cat => {
       row[cat] = countBy(valid, c => c.month === month && c.category === cat);
@@ -4297,12 +4298,14 @@ function computeAggregates(creatives) {
       img: countBy(ms, c => c.format === "image"),
       vid: countBy(ms, c => c.format === "video"),
       total: ms.length,
-      noData: ms.length === 0
+      noData: ms.length === 0,
+      isFuture: isFuture(month)
     };
   });
   const PARTNERSHIP_BY_CAT = window12.map(month => {
     const row = {
-      month
+      month,
+      isFuture: isFuture(month)
     };
     cats.forEach(cat => {
       row[cat] = countBy(valid, c => c.month === month && c.category === cat && c.partnership);
@@ -4325,11 +4328,12 @@ function computeAggregates(creatives) {
     PREV_YEAR_TOTALS[month] = countBy(valid, c => c.monthIdx === targetIdx);
   });
 
-  // Prev-month baselines (used by Tab 02 KPI trend, and Tab 01 if revived)
-  const last = window12[window12.length - 1];
-  const prev = window12[window12.length - 2];
-  const lastCs = valid.filter(c => c.month === last);
-  const prevCs = valid.filter(c => c.month === prev);
+  // Prev-month baselines (used by Tab 02 KPI trend, and Tab 01 if revived).
+  // Use the latest month WITH DATA and the month before, ignoring future placeholders.
+  const pastWithData = window12.filter(m => !isFuture(m));
+  const last = pastWithData[pastWithData.length - 1] || null;
+  const prev = pastWithData[pastWithData.length - 2] || null;
+  const prevCs = prev ? valid.filter(c => c.month === prev) : [];
   const PREV_MONTH = {
     avgDays: 6,
     gtmPct: 72,
@@ -4346,9 +4350,13 @@ function computeAggregates(creatives) {
       vid: countBy(catPrev, c => c.format === "video")
     };
   });
+
+  // Dropdown only offers past months that actually have data (no point letting
+  // a user select May '26 if it hasn't happened yet).
+  const AVAILABLE_MONTHS = window12.filter(m => !isFuture(m));
   return {
     creatives: valid,
-    AVAILABLE_MONTHS: window12,
+    AVAILABLE_MONTHS,
     ALL_12_MONTHS: window12,
     CATS: cats.length ? cats : knownCats,
     MONTHLY_BY_CAT,
@@ -4358,7 +4366,8 @@ function computeAggregates(creatives) {
     PREV_YEAR_TOTALS,
     PREV_MONTH,
     PREV_MONTH_CAT,
-    latestMonth: last
+    latestMonth: latestMonthLabel,
+    currentYear: currentYY
   };
 }
 
