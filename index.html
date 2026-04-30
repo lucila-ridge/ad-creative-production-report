@@ -2520,13 +2520,24 @@ const CreativeProduction = ({
       if (!isYoY) {
         return [["Video", "#4A7C59"], ["Image", "#7B9EC7"]];
       }
-      // Derive year labels from the data window. Data spans Apr 'Y to Mar '(Y+1);
-      // dominant year = Y, and prev-year window is dominant by Y-1.
-      const firstMonth = MONTHLY_HISTORY_FULL[0]?.month || "Apr '25";
-      const dominantYY = firstMonth.split("'")[1] || "25";
-      const curYear = `20${dominantYY}`;
-      const prevYear = `20${String(parseInt(dominantYY, 10) - 1).padStart(2, "0")}`;
-      return [[prevYear, "#B8B4AA"], [curYear, "#C45220"]];
+      // Build explicit date-range labels so users can see the window cleanly.
+      // E.g. for May '25 → Apr '26, prior series is May '24 → Apr '25.
+      const months = MONTHLY_HISTORY_FULL.map(m => m.month).filter(Boolean);
+      if (!months.length) return [["Last period", "#B8B4AA"], ["This period", "#C45220"]];
+      const first = months[0],
+        last = months[months.length - 1];
+      const shiftYearLabel = (label, delta) => {
+        // "May '25" → "May '24" (delta = -1)
+        const parts = label.split(" '");
+        if (parts.length !== 2) return label;
+        const yy = parseInt(parts[1], 10);
+        if (isNaN(yy)) return label;
+        const newYY = String((yy + delta + 100) % 100).padStart(2, "0");
+        return `${parts[0]} '${newYY}`;
+      };
+      const curRange = `${first}–${last}`;
+      const prevRange = `${shiftYearLabel(first, -1)}–${shiftYearLabel(last, -1)}`;
+      return [[prevRange, "#B8B4AA"], [curRange, "#C45220"]];
     })().map(([l, c]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
