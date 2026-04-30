@@ -1202,6 +1202,13 @@ const Tooltip = ({
     }
   }, text));
 };
+
+// Format a number: integers stay integers, decimals get rounded to 1 place.
+const fmtNum = n => {
+  if (n == null || isNaN(Number(n))) return "—";
+  const num = Number(n);
+  return Number.isInteger(num) ? String(num) : num.toFixed(1);
+};
 const Delta = ({
   current,
   prev,
@@ -1217,7 +1224,7 @@ const Delta = ({
   if (diff === 0 || prev === 0) return null;
   const direction = up ? "increase" : "decrease";
   // If month/period labels were supplied, build a more descriptive tooltip with both values.
-  const tooltipText = prevLabel && currentLabel ? `${period} · ${prevLabel} (${prev}) → ${currentLabel} (${current}): ${direction} ${up ? "+" : "-"}${Math.abs(pct)}%` : `${period} ${direction}: ${up ? "+" : "-"}${Math.abs(pct)}%`;
+  const tooltipText = prevLabel && currentLabel ? `${period} · ${prevLabel} (${fmtNum(prev)}) → ${currentLabel} (${fmtNum(current)}): ${direction} ${up ? "+" : "-"}${Math.abs(pct)}%` : `${period} ${direction}: ${up ? "+" : "-"}${Math.abs(pct)}%`;
   return /*#__PURE__*/React.createElement(Tooltip, {
     text: tooltipText
   }, /*#__PURE__*/React.createElement("span", {
@@ -1967,41 +1974,12 @@ const LineChartWithTooltip = ({
   }, cat)))), /*#__PURE__*/React.createElement("div", {
     style: {
       position: "relative",
-      paddingLeft: 40,
-      paddingBottom: 24
+      paddingLeft: 40
     }
-  }, yTicks.map(v => /*#__PURE__*/React.createElement("div", {
-    key: v,
-    style: {
-      position: "absolute",
-      left: 0,
-      right: 0,
-      bottom: 24 + v / maxVal * LINE_H - 7,
-      pointerEvents: "none"
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      position: "absolute",
-      left: 0,
-      fontSize: 10,
-      color: R.shale,
-      fontFamily: "'Barlow', sans-serif",
-      width: 36,
-      textAlign: "right"
-    }
-  }, v), /*#__PURE__*/React.createElement("div", {
-    style: {
-      position: "absolute",
-      left: 40,
-      right: 0,
-      top: 7,
-      borderTop: `1px solid ${v === 0 ? R.border : R.border + "66"}`
-    }
-  }))), hoverIdx !== null && (() => {
+  }, hoverIdx !== null && (() => {
     const m = data[hoverIdx];
     const total = activeCats.reduce((s, cat) => s + (m[cat] || 0), 0);
     const tipW = 190;
-    // chartW is now the actual SVG pixel width — no scaling needed
     const rawX = px(hoverIdx);
     const tipX = rawX + tipW > chartW ? rawX - tipW - 8 : rawX + 12;
     return /*#__PURE__*/React.createElement("div", {
@@ -2030,12 +2008,6 @@ const LineChartWithTooltip = ({
       }
     }, m.month, " \u2014 ", total, " total"), activeCats.map(cat => {
       const val = m[cat] || 0;
-      const split = CAT_SPLIT[cat] || {
-        imgPct: 0.65,
-        vidPct: 0.35
-      };
-      const img = Math.round(val * split.imgPct);
-      const vid = Math.round(val * split.vidPct);
       return /*#__PURE__*/React.createElement("div", {
         key: cat,
         style: {
@@ -2066,27 +2038,48 @@ const LineChartWithTooltip = ({
           color: R.black,
           fontFamily: "'Barlow', sans-serif"
         }
-      }, cat)), /*#__PURE__*/React.createElement("div", {
-        style: {
-          textAlign: "right"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
+      }, cat)), /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 13,
           fontWeight: 700,
           color: R.black,
           fontFamily: "'Barlow', sans-serif"
         }
-      }, val), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontSize: 10,
-          color: R.shale,
-          fontFamily: "'Barlow', sans-serif",
-          marginLeft: 6
-        }
-      }, img, " img \xB7 ", vid, " vid")));
+      }, val));
     }));
-  })(), /*#__PURE__*/React.createElement("svg", {
+  })(), /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "relative",
+      height: LINE_H
+    }
+  }, yTicks.map(v => {
+    const yPos = v / maxVal * LINE_H;
+    return /*#__PURE__*/React.createElement("div", {
+      key: v,
+      style: {
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: yPos,
+        pointerEvents: "none"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        position: "absolute",
+        left: -40,
+        fontSize: 10,
+        color: R.shale,
+        fontFamily: "'Barlow', sans-serif",
+        width: 36,
+        textAlign: "right",
+        transform: "translateY(-50%)"
+      }
+    }, v), /*#__PURE__*/React.createElement("div", {
+      style: {
+        borderTop: `1px solid ${v === 0 ? R.border : R.border + "66"}`
+      }
+    }));
+  }), /*#__PURE__*/React.createElement("svg", {
     ref: svgRef,
     width: "100%",
     height: LINE_H,
@@ -2094,7 +2087,11 @@ const LineChartWithTooltip = ({
     style: {
       display: "block",
       overflow: "visible",
-      cursor: "crosshair"
+      cursor: "crosshair",
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0
     },
     onMouseMove: e => {
       const rect = e.currentTarget.getBoundingClientRect();
@@ -2146,7 +2143,7 @@ const LineChartWithTooltip = ({
     width: colW,
     height: LINE_H,
     fill: "transparent"
-  }))), /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -2270,21 +2267,35 @@ const CreativeProduction = ({
   });
   const maxCatTotal = Math.max(...catStats.map(s => s.total), 1);
 
-  // Monthly stacked bar — filter by active cats from MONTHLY_HISTORY
-  const monthlyStacked = MONTHLY_HISTORY_FULL.map(m => ({
-    month: m.month,
-    img: catFilter.length > 0 ? Math.round(m.img * (catFilter.length / CATS.length)) : m.img,
-    vid: catFilter.length > 0 ? Math.round(m.vid * (catFilter.length / CATS.length)) : m.vid
-  }));
-  monthlyStacked.forEach(m => {
-    m.total = m.img + m.vid;
+  // Monthly bar data — count creatives directly per month with current cat+fmt filters
+  // applied. Replaces the old approximation-based scaling so YoY math is consistent
+  // and both years respect the active filter set.
+  const monthlyStacked = MONTHLY_HISTORY_FULL.map(m => {
+    const ms = creatives.filter(c => c.month === m.month && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter));
+    return {
+      month: m.month,
+      img: ms.filter(c => c.format === "image").length,
+      vid: ms.filter(c => c.format === "video").length,
+      total: ms.length,
+      noData: m.noData,
+      isFuture: m.isFuture
+    };
   });
+  // Filtered prev-year same-month total — used by the YoY toggle
+  const filteredPrevYearTotal = monthLabel => {
+    const monthName = monthLabel.split(" '")[0] || "";
+    const yyShort = monthLabel.split(" '")[1] || "";
+    if (!monthName || !yyShort) return 0;
+    const prevYY = String(parseInt(yyShort, 10) - 1).padStart(2, "0");
+    const prevMonthLabel = `${monthName} '${prevYY}`;
+    return creatives.filter(c => c.month === prevMonthLabel && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter)).length;
+  };
   const maxBar = Math.max(...monthlyStacked.map(m => m.total), 1);
   const CHART_H = 140;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
     num: "02",
     label: "Creative Production",
-    desc: "Output view \u2014 volume and mix of creative produced, month over month."
+    desc: "Output view \u2014 volume and mix of creative produced YoY"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -2323,7 +2334,8 @@ const CreativeProduction = ({
     const isYoY = chartView === "yoy";
     // FIXED Y axis — same scale across both toggles so the chart doesn't bounce.
     // Floor at 1500; if real data ever exceeds that, round up to next 250.
-    const observedMax = Math.max(...MONTHLY_HISTORY_FULL.map(m => m.total || 0), ...Object.values(PREV_YEAR_TOTALS), 1);
+    // Both this-year and prev-year totals respect cat+fmt filters.
+    const observedMax = Math.max(...monthlyStacked.map(m => m.total || 0), ...monthlyStacked.map(m => filteredPrevYearTotal(m.month)), 1);
     const activeMax = observedMax <= 1500 ? 1500 : Math.ceil(observedMax / 250) * 250;
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2431,7 +2443,7 @@ const CreativeProduction = ({
       const groupOpacity = isFuture ? 0.25 : isActive ? 1 : isYoY ? 0.55 : 0.45;
       if (isYoY) {
         const curTotal = isFuture ? 0 : m.total || 0;
-        const prevTotal = PREV_YEAR_TOTALS[m.month] || 0;
+        const prevTotal = filteredPrevYearTotal(m.month);
         const curH = curTotal / activeMax * CHART_H;
         const prevH = prevTotal / activeMax * CHART_H;
         const yoyPct = prevTotal > 0 && curTotal > 0 ? Math.round((curTotal - prevTotal) / prevTotal * 100) : null;
@@ -2513,8 +2525,6 @@ const CreativeProduction = ({
       const isActive = m.month === selectedMonth;
       const isFuture = m.isFuture;
       const monthName = m.month.split(" '")[0] || m.month;
-      const yyShort = m.month.split(" '")[1] || "";
-      const fullYear = yyShort ? `20${yyShort}` : "";
       return /*#__PURE__*/React.createElement("div", {
         key: i,
         style: {
@@ -2523,20 +2533,11 @@ const CreativeProduction = ({
           fontFamily: "'Barlow', sans-serif",
           color: isActive ? R.black : R.shale,
           fontWeight: isActive ? 700 : 400,
+          fontSize: 10,
           lineHeight: 1.2,
           opacity: isFuture ? 0.4 : 1
         }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 10
-        }
-      }, monthName), isYoY && /*#__PURE__*/React.createElement("div", {
-        style: {
-          fontSize: 9,
-          color: isActive ? R.shale : R.textMuted,
-          marginTop: 1
-        }
-      }, fullYear));
+      }, monthName);
     }))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
@@ -2612,8 +2613,18 @@ const CreativeProduction = ({
     };
     const activeCatsForLine = catFilter.length > 0 ? catFilter : CATS;
     // Trend Lines uses the rolling-12 window so the lines flow continuously
-    // (no empty future-month positions).
-    const data = MONTHLY_BY_CAT_ROLLING;
+    // (no empty future-month positions). Counts come from `creatives` directly
+    // so the active fmtFilter (image/video) is applied per category per month.
+    const data = MONTHLY_BY_CAT_ROLLING.map(m => {
+      const row = {
+        month: m.month,
+        isFuture: m.isFuture
+      };
+      CATS.forEach(cat => {
+        row[cat] = creatives.filter(c => c.month === m.month && c.category === cat && (fmtFilter === "all" || c.format === fmtFilter)).length;
+      });
+      return row;
+    });
     const allVals = data.flatMap(m => activeCatsForLine.map(cat => m[cat] || 0));
     const maxVal = Math.max(...allVals, 1);
     const LINE_H = 220;
@@ -2782,6 +2793,191 @@ const CreativeProduction = ({
     }
   }, l)))))), (() => {
     const displayCats = catFilter.length > 0 ? catFilter : CATS;
+    const matchesFilter = c => (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter);
+
+    // Years present in the data, ascending
+    const yearsInData = [...new Set(creatives.map(c => parseInt(c.month.split(" '")[1], 10) + 2000))].sort();
+
+    // For each year, build a label and per-category counts
+    const yearData = yearsInData.map(year => {
+      const yyShort = String(year).slice(-2);
+      const yearCs = creatives.filter(c => c.month.endsWith(`'${yyShort}`) && matchesFilter(c));
+      const byCategory = {};
+      displayCats.forEach(cat => {
+        byCategory[cat] = yearCs.filter(c => c.category === cat).length;
+      });
+      // Detect partial year — if not all 12 months are present in this year's data
+      const monthsInYear = [...new Set(yearCs.map(c => c.month))].sort((a, b) => monthIndex(a) - monthIndex(b));
+      const allMonthsCount = MONTH_ABBR.filter(mn => creatives.some(c => c.month === `${mn} '${yyShort}`)).length;
+      const isPartial = allMonthsCount < 12 && monthsInYear.length > 0;
+      let label = String(year);
+      if (isPartial) {
+        const earliest = monthsInYear[0].split(" '")[0];
+        const latest = monthsInYear[monthsInYear.length - 1].split(" '")[0];
+        label = earliest === latest ? `${year} ${earliest}` : `${year} ${earliest}–${latest}`;
+      }
+      return {
+        year,
+        label,
+        byCategory
+      };
+    });
+
+    // Y axis max — round up to a clean number
+    const maxCount = Math.max(...yearData.flatMap(y => Object.values(y.byCategory)), 1);
+    const yMax = maxCount <= 100 ? Math.ceil(maxCount / 25) * 25 : maxCount <= 1000 ? Math.ceil(maxCount / 100) * 100 : Math.ceil(maxCount / 500) * 500;
+    const CHART_H = 240;
+    const Y_LABEL_W = 50;
+
+    // Sequential palette for years — newest is rust (brand)
+    const YEAR_PALETTE = ["#2C3E6B", "#2D6A4F", "#C47C20", "#7B3FBE", "#A04040"];
+    const yearColor = (i, total) => YEAR_PALETTE[(YEAR_PALETTE.length - total + i + YEAR_PALETTE.length) % YEAR_PALETTE.length];
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: R.surface,
+        borderRadius: 8,
+        border: `1px solid ${R.border}`,
+        padding: "24px 28px",
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 15,
+        fontWeight: 600,
+        color: R.black,
+        fontFamily: "'Barlow', sans-serif",
+        marginBottom: 2
+      }
+    }, "Annual Output by Category"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: R.shale,
+        fontFamily: "'Barlow', sans-serif"
+      }
+    }, "Full-year totals grouped by year")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 20,
+        marginTop: 16,
+        marginBottom: 24,
+        justifyContent: "center",
+        flexWrap: "wrap"
+      }
+    }, yearData.map((y, i) => /*#__PURE__*/React.createElement("div", {
+      key: y.year,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 12,
+        height: 12,
+        borderRadius: 2,
+        background: yearColor(i, yearData.length)
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: R.black,
+        fontFamily: "'Barlow', sans-serif",
+        fontWeight: 600
+      }
+    }, y.label)))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        paddingLeft: Y_LABEL_W
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "relative",
+        height: CHART_H
+      }
+    }, [0, 0.25, 0.5, 0.75, 1].map(t => /*#__PURE__*/React.createElement("div", {
+      key: t,
+      style: {
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: t * CHART_H,
+        pointerEvents: "none"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        position: "absolute",
+        left: -Y_LABEL_W,
+        fontSize: 10,
+        color: R.shale,
+        fontFamily: "'Barlow', sans-serif",
+        width: Y_LABEL_W - 6,
+        textAlign: "right",
+        transform: "translateY(-50%)"
+      }
+    }, Math.round(t * yMax).toLocaleString()), /*#__PURE__*/React.createElement("div", {
+      style: {
+        borderTop: `1px solid ${t === 0 ? R.border : R.border + "66"}`
+      }
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        top: 0,
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 16
+      }
+    }, displayCats.map(cat => /*#__PURE__*/React.createElement("div", {
+      key: cat,
+      style: {
+        flex: 1,
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 4,
+        justifyContent: "center"
+      }
+    }, yearData.map((y, i) => {
+      const val = y.byCategory[cat] || 0;
+      const barH = val / yMax * CHART_H;
+      const tooltip = `${y.label} · ${cat}: ${val.toLocaleString()} creatives`;
+      return /*#__PURE__*/React.createElement("div", {
+        key: y.year,
+        title: tooltip,
+        style: {
+          flex: 1,
+          maxWidth: 32,
+          height: Math.max(barH, val > 0 ? 2 : 0),
+          background: yearColor(i, yearData.length),
+          borderRadius: "2px 2px 0 0",
+          cursor: "help"
+        }
+      });
+    }))))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 16,
+        marginTop: 10
+      }
+    }, displayCats.map(cat => /*#__PURE__*/React.createElement("div", {
+      key: cat,
+      style: {
+        flex: 1,
+        textAlign: "center",
+        fontSize: 11,
+        fontWeight: 600,
+        color: R.black,
+        fontFamily: "'Barlow', sans-serif",
+        textTransform: "uppercase",
+        letterSpacing: "0.05em"
+      }
+    }, cat)))));
+  })(), (() => {
+    const displayCats = catFilter.length > 0 ? catFilter : CATS;
     const selYear = selectedMonth.includes("'26") ? 2026 : 2025;
     const yr = String(selYear).slice(2);
     const quarters = [{
@@ -2800,38 +2996,14 @@ const CreativeProduction = ({
       ...q,
       months: q.months.filter(m => MONTHLY_BY_CAT.find(d => d.month === m))
     })).filter(q => q.months.length > 0);
-    const CAT_SPLIT = {
-      EDC: {
-        i: 0.72,
-        v: 0.28
-      },
-      Jewelry: {
-        i: 0.58,
-        v: 0.42
-      },
-      Travel: {
-        i: 0.62,
-        v: 0.38
-      },
-      Tech: {
-        i: 0.45,
-        v: 0.55
-      },
-      "Gut-Culture": {
-        i: 0.50,
-        v: 0.50
-      }
-    };
+
+    // Count real img/vid from creatives — replaces the old CAT_SPLIT approximation
+    // which made Gut-Culture's img always equal vid.
     const getImgVid = (month, cat) => {
-      const row = MONTHLY_BY_CAT.find(d => d.month === month);
-      const total = row?.[cat] || 0;
-      const sp = CAT_SPLIT[cat] || {
-        i: 0.65,
-        v: 0.35
-      };
+      const ms = creatives.filter(c => c.month === month && c.category === cat);
       return {
-        img: Math.round(total * sp.i),
-        vid: Math.round(total * sp.v)
+        img: ms.filter(c => c.format === "image").length,
+        vid: ms.filter(c => c.format === "video").length
       };
     };
 
@@ -3381,7 +3553,8 @@ const PartnershipContent = ({
     PARTNERSHIP_BY_CAT,
     PARTNER_PLATFORM_DATA,
     ALL_12_MONTHS,
-    CATS
+    CATS,
+    creatives
   } = data;
   const [tableView, setTableView] = useState("month");
   const [formatView, setFormatView] = useState("total");
@@ -3408,39 +3581,12 @@ const PartnershipContent = ({
   // Category bars — this month
   const catBarsMax = Math.max(...displayCats.map(c => selRow?.[c] || 0), 1);
 
-  // CAT_SPLIT for img/vid
-  const CAT_SPLIT = {
-    EDC: {
-      i: 0.72,
-      v: 0.28
-    },
-    Jewelry: {
-      i: 0.58,
-      v: 0.42
-    },
-    Travel: {
-      i: 0.62,
-      v: 0.38
-    },
-    Tech: {
-      i: 0.45,
-      v: 0.55
-    },
-    "Gut-Culture": {
-      i: 0.50,
-      v: 0.50
-    }
-  };
+  // Count real img/vid from creatives, restricted to partnership=true.
   const getImgVid = (month, cat) => {
-    const row = PARTNERSHIP_BY_CAT.find(d => d.month === month);
-    const total = row?.[cat] || 0;
-    const sp = CAT_SPLIT[cat] || {
-      i: 0.65,
-      v: 0.35
-    };
+    const ms = creatives.filter(c => c.month === month && c.category === cat && c.partnership);
     return {
-      img: Math.round(total * sp.i),
-      vid: Math.round(total * sp.v)
+      img: ms.filter(c => c.format === "image").length,
+      vid: ms.filter(c => c.format === "video").length
     };
   };
   const getTotal = (month, cat) => PARTNERSHIP_BY_CAT.find(d => d.month === month)?.[cat] || 0;
