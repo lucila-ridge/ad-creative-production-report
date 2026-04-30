@@ -4429,10 +4429,10 @@ function App() {
     };
     timeoutId = setTimeout(() => {
       if (window[cbName]) {
-        setLoadError("Sheet load timed out after 30 seconds. The Apps Script may have errored before responding.");
+        setLoadError("Sheet load timed out after 60 seconds. Apps Script may be slow on cold-start, errored, or returning a payload too large to deliver.");
         cleanup();
       }
-    }, 30000);
+    }, 60000);
     document.head.appendChild(script);
     return cleanup;
   }, []);
