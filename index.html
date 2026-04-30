@@ -2202,7 +2202,7 @@ const CreativeProduction = ({
   const selectedIdx = MONTHLY_HISTORY_FULL.findIndex(m => m.month === selectedMonth);
   const [tableView, setTableView] = useState("month");
   const [formatView, setFormatView] = useState("total"); // "total" | "split"
-  const [chartView, setChartView] = useState("current"); // "current" (stacked img/vid) | "yoy" (current vs prev year totals)
+  const [chartView, setChartView] = useState("format"); // "format" (stacked img/vid) | "category" (stacked by category)
 
   // Live creatives are already normalized — give them the legacy shape this component
   // still expects (categories[] coming from the row's category field).
@@ -2331,11 +2331,31 @@ const CreativeProduction = ({
     prevLabel: yoyPrevLabel,
     currentLabel: yoyCurrentLabel
   })), (() => {
-    const isYoY = chartView === "yoy";
-    // FIXED Y axis — same scale across both toggles so the chart doesn't bounce.
-    // Floor at 1500; if real data ever exceeds that, round up to next 250.
-    // Both this-year and prev-year totals respect cat+fmt filters.
-    const observedMax = Math.max(...monthlyStacked.map(m => m.total || 0), ...monthlyStacked.map(m => filteredPrevYearTotal(m.month)), 1);
+    const isCategory = chartView === "category";
+    // Soft palette for the By Category view — coherent with the rest of the report
+    const CAT_COLORS_SOFT = {
+      EDC: "#5B7FA6",
+      Tech: "#8E73B5",
+      Jewelry: "#C18A48",
+      Travel: "#6F9A77",
+      "Gut-Culture": "#B96B5A"
+    };
+    const displayCats = catFilter.length > 0 ? catFilter : CATS;
+    // For By Category: count creatives per (month, cat) with active filters
+    const monthlyByCat = MONTHLY_HISTORY_FULL.map(m => {
+      const ms = creatives.filter(c => c.month === m.month && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter));
+      const byCat = {};
+      displayCats.forEach(cat => {
+        byCat[cat] = ms.filter(c => c.category === cat).length;
+      });
+      return {
+        ...m,
+        byCat,
+        total: ms.length
+      };
+    });
+    // FIXED Y axis: shared between both toggles for stability
+    const observedMax = Math.max(...monthlyStacked.map(m => m.total || 0), ...monthlyByCat.map(m => m.total || 0), 1);
     const activeMax = observedMax <= 1500 ? 1500 : Math.ceil(observedMax / 250) * 250;
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2368,7 +2388,7 @@ const CreativeProduction = ({
         color: R.shale,
         fontFamily: "'Barlow', sans-serif"
       }
-    }, isYoY ? `${data.currentYear || ""} vs ${(data.currentYear || 0) - 1} — Jan to Dec` : "Stacked by format — calendar year")), /*#__PURE__*/React.createElement("div", {
+    }, isCategory ? "Stacked by category — calendar year" : "Stacked by format — calendar year")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         background: R.surfaceAlt,
@@ -2376,7 +2396,7 @@ const CreativeProduction = ({
         padding: 3,
         gap: 2
       }
-    }, [["current", "This Year"], ["yoy", "YoY"]].map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    }, [["format", "By Format"], ["category", "By Category"]].map(([v, l]) => /*#__PURE__*/React.createElement("button", {
       key: v,
       onClick: () => setChartView(v),
       style: {
@@ -2440,46 +2460,50 @@ const CreativeProduction = ({
       const isActive = m.month === selectedMonth;
       const isEmpty = m.noData;
       const isFuture = m.isFuture;
-      const groupOpacity = isFuture ? 0.25 : isActive ? 1 : isYoY ? 0.55 : 0.45;
-      if (isYoY) {
-        const curTotal = isFuture ? 0 : m.total || 0;
-        const prevTotal = filteredPrevYearTotal(m.month);
-        const curH = curTotal / activeMax * CHART_H;
-        const prevH = prevTotal / activeMax * CHART_H;
-        const yoyPct = prevTotal > 0 && curTotal > 0 ? Math.round((curTotal - prevTotal) / prevTotal * 100) : null;
-        const direction = yoyPct === null ? "" : yoyPct > 0 ? "increase" : yoyPct < 0 ? "decrease" : "no change";
-        const tooltipText = isFuture ? `${m.month}: not yet` : yoyPct === null ? `${m.month}: no prior-year data` : `${m.month} · YoY ${direction}: ${yoyPct > 0 ? "+" : ""}${yoyPct}% (${prevTotal} → ${curTotal})`;
+      const groupOpacity = isFuture ? 0.25 : isActive ? 1 : 0.55;
+      if (isCategory) {
+        const catRow = monthlyByCat[i];
+        const total = catRow.total;
+        const tooltipText = isFuture ? `${m.month}: not yet` : `${m.month} · ${total} total — ${displayCats.map(cat => `${cat}: ${catRow.byCat[cat] || 0}`).join(", ")}`;
         return /*#__PURE__*/React.createElement("div", {
           key: i,
           title: tooltipText,
           style: {
             flex: 1,
             display: "flex",
-            alignItems: "flex-end",
-            gap: 2,
+            flexDirection: "column",
+            alignItems: "stretch",
+            justifyContent: "flex-end",
             height: CHART_H,
             opacity: groupOpacity,
             transition: "opacity 0.2s",
             cursor: "help"
           }
-        }, /*#__PURE__*/React.createElement("div", {
+        }, isFuture || total === 0 ? /*#__PURE__*/React.createElement("div", {
           style: {
-            flex: 1,
-            height: prevH,
-            background: "#B8B4AA",
-            borderRadius: "2px 2px 0 0"
+            height: 3,
+            background: R.border,
+            borderRadius: 2
           }
-        }), /*#__PURE__*/React.createElement("div", {
-          style: {
-            flex: 1,
-            height: curH,
-            background: "#C45220",
-            borderRadius: "2px 2px 0 0"
-          }
+        }) :
+        // Render top → bottom: last category at top of stack gets rounded corners
+        displayCats.slice().reverse().map((cat, ci) => {
+          const v = catRow.byCat[cat] || 0;
+          if (v === 0) return null;
+          const h = v / activeMax * CHART_H;
+          const isTopSegment = ci === 0;
+          return /*#__PURE__*/React.createElement("div", {
+            key: cat,
+            style: {
+              height: h,
+              background: CAT_COLORS_SOFT[cat] || R.shale,
+              borderRadius: isTopSegment ? "2px 2px 0 0" : 0
+            }
+          });
         }));
       }
 
-      // Default: stacked img/vid
+      // By Format: stacked img/vid
       const imgH = m.img / activeMax * CHART_H;
       const vidH = m.vid / activeMax * CHART_H;
       const thisYrTooltip = isFuture ? `${m.month}: not yet` : `${m.month} · ${m.total} ads (${m.img} image · ${m.vid} video)`;
@@ -2541,18 +2565,11 @@ const CreativeProduction = ({
     }))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
-        gap: 20,
-        marginTop: 4
+        gap: 16,
+        marginTop: 12,
+        flexWrap: "wrap"
       }
-    }, (() => {
-      if (!isYoY) {
-        return [["Video", "#4A7C59"], ["Image", "#7B9EC7"]];
-      }
-      // Window is now Jan–Dec of the current year, so a single year label
-      // is unambiguous for each series.
-      const cy = data && data.currentYear ? data.currentYear : 2026;
-      return [[String(cy - 1), "#B8B4AA"], [String(cy), "#C45220"]];
-    })().map(([l, c]) => /*#__PURE__*/React.createElement("div", {
+    }, (isCategory ? displayCats.map(cat => [cat, CAT_COLORS_SOFT[cat] || R.shale]) : [["Video", "#4A7C59"], ["Image", "#7B9EC7"]]).map(([l, c]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
         display: "flex",
@@ -2581,87 +2598,192 @@ const CreativeProduction = ({
       marginBottom: 24
     }
   }, (() => {
-    const CAT_COLORS = {
-      EDC: "#2C3E6B",
-      Jewelry: "#C47C20",
-      Travel: "#3A7A4A",
-      Tech: "#7B3FBE",
-      "Gut-Culture": "#A04040"
-    };
-    // Per-category img/vid split for tooltip (rough 65/35 split per cat from mock)
-    const CAT_SPLIT = {
-      EDC: {
-        imgPct: 0.72,
-        vidPct: 0.28
-      },
-      Jewelry: {
-        imgPct: 0.58,
-        vidPct: 0.42
-      },
-      Travel: {
-        imgPct: 0.62,
-        vidPct: 0.38
-      },
-      Tech: {
-        imgPct: 0.45,
-        vidPct: 0.55
-      },
-      "Gut-Culture": {
-        imgPct: 0.50,
-        vidPct: 0.50
-      }
-    };
-    const activeCatsForLine = catFilter.length > 0 ? catFilter : CATS;
-    // Trend Lines uses the rolling-12 window so the lines flow continuously
-    // (no empty future-month positions). Counts come from `creatives` directly
-    // so the active fmtFilter (image/video) is applied per category per month.
-    const data = MONTHLY_BY_CAT_ROLLING.map(m => {
-      const row = {
-        month: m.month,
-        isFuture: m.isFuture
-      };
-      CATS.forEach(cat => {
-        row[cat] = creatives.filter(c => c.month === m.month && c.category === cat && (fmtFilter === "all" || c.format === fmtFilter)).length;
-      });
-      return row;
+    const cyYear = data.currentYear || 2026;
+    const lyYear = cyYear - 1;
+    const yyShort = y => String(y).slice(-2);
+    // Per-month total, filtered by active cat + fmt
+    const yearTotals = year => MONTH_ABBR.map(monthName => {
+      const monthLabel = `${monthName} '${yyShort(year)}`;
+      return creatives.filter(c => c.month === monthLabel && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter)).length;
     });
-    const allVals = data.flatMap(m => activeCatsForLine.map(cat => m[cat] || 0));
-    const maxVal = Math.max(...allVals, 1);
-    const LINE_H = 220;
-    const py = (v, h) => h - v / maxVal * h;
-    const catmullPath = pts => {
-      if (pts.length < 2) return "";
-      let d = `M ${pts[0][0]},${pts[0][1]}`;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const p0 = pts[Math.max(i - 1, 0)];
-        const p1 = pts[i];
-        const p2 = pts[i + 1];
-        const p3 = pts[Math.min(i + 2, pts.length - 1)];
-        const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
-        const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
-        const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
-        const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
-        d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+    const cyData = yearTotals(cyYear);
+    const lyData = yearTotals(lyYear);
+    // Latest month with data in current year (cuts the rust line/area there)
+    let lastIdx = -1;
+    cyData.forEach((v, i) => {
+      if (v > 0) lastIdx = i;
+    });
+    const cutoff = lastIdx >= 0 ? lastIdx + 1 : 0;
+    const max = Math.max(...cyData, ...lyData, 1);
+    const yMax = max <= 100 ? Math.ceil(max / 25) * 25 : max <= 1000 ? Math.ceil(max / 100) * 100 : Math.ceil(max / 250) * 250;
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(t * yMax));
+    const W = 600,
+      H = 220;
+    const xAt = i => i / 11 * W;
+    const yAt = v => H - v / yMax * H;
+    const linePath = (arr, end) => {
+      if (end <= 0) return "";
+      let d = "";
+      for (let i = 0; i < end; i++) {
+        d += (i === 0 ? "M " : " L ") + `${xAt(i)},${yAt(arr[i])}`;
       }
       return d;
     };
-    const yTicks = [0, Math.round(maxVal * 0.25), Math.round(maxVal * 0.5), Math.round(maxVal * 0.75), maxVal];
-
-    // Index of the selected month inside the rolling-12 array (different
-    // from the calendar-year selectedIdx in the parent scope).
-    const trendSelectedIdx = data.findIndex(m => m.month === selectedMonth);
-    return /*#__PURE__*/React.createElement(LineChartWithTooltip, {
-      data: data,
-      activeCats: activeCatsForLine,
-      CAT_COLORS: CAT_COLORS,
-      CAT_SPLIT: CAT_SPLIT,
-      selectedIdx: trendSelectedIdx,
-      py: py,
-      catmullPath: catmullPath,
-      yTicks: yTicks,
-      maxVal: maxVal,
-      LINE_H: LINE_H
-    });
+    const areaPath = (arr, end) => {
+      if (end <= 0) return "";
+      let d = `M ${xAt(0)},${H} `;
+      for (let i = 0; i < end; i++) {
+        d += `L ${xAt(i)},${yAt(arr[i])} `;
+      }
+      d += `L ${xAt(end - 1)},${H} Z`;
+      return d;
+    };
+    const LY_COLOR = "#B8B4AA";
+    const CY_COLOR = "#C45220";
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: R.surface,
+        borderRadius: 8,
+        border: `1px solid ${R.border}`,
+        padding: "24px 28px"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 15,
+        fontWeight: 600,
+        color: R.black,
+        fontFamily: "'Barlow', sans-serif",
+        marginBottom: 2
+      }
+    }, "Monthly Ad Volume YoY"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: R.shale,
+        fontFamily: "'Barlow', sans-serif",
+        marginBottom: 16
+      }
+    }, "Total this year vs last year \u2014 Jan to Dec"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 20,
+        marginBottom: 20,
+        flexWrap: "wrap"
+      }
+    }, [[String(lyYear), LY_COLOR], [String(cyYear), CY_COLOR]].map(([l, c]) => /*#__PURE__*/React.createElement("div", {
+      key: l,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        width: 16,
+        height: 3,
+        borderRadius: 1,
+        background: c
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: R.black,
+        fontFamily: "'Barlow', sans-serif",
+        fontWeight: 600
+      }
+    }, l)))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        paddingLeft: 40
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        position: "relative",
+        height: H
+      }
+    }, yTicks.map((v, idx) => {
+      const t = idx / 4;
+      return /*#__PURE__*/React.createElement("div", {
+        key: v + "_" + idx,
+        style: {
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: t * H,
+          pointerEvents: "none"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          position: "absolute",
+          left: -40,
+          fontSize: 10,
+          color: R.shale,
+          fontFamily: "'Barlow', sans-serif",
+          width: 34,
+          textAlign: "right",
+          transform: "translateY(-50%)"
+        }
+      }, v.toLocaleString()), /*#__PURE__*/React.createElement("div", {
+        style: {
+          borderTop: `1px solid ${idx === 0 ? R.border : R.border + "66"}`
+        }
+      }));
+    }), /*#__PURE__*/React.createElement("svg", {
+      width: "100%",
+      height: H,
+      viewBox: `0 0 ${W} ${H}`,
+      preserveAspectRatio: "none",
+      style: {
+        display: "block",
+        overflow: "visible",
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0
+      }
+    }, /*#__PURE__*/React.createElement("path", {
+      d: areaPath(lyData, 12),
+      fill: LY_COLOR + "33"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: linePath(lyData, 12),
+      fill: "none",
+      stroke: LY_COLOR,
+      strokeWidth: "2",
+      strokeLinecap: "round",
+      strokeLinejoin: "round"
+    }), cutoff > 0 && /*#__PURE__*/React.createElement("path", {
+      d: areaPath(cyData, cutoff),
+      fill: CY_COLOR + "33"
+    }), cutoff > 1 && /*#__PURE__*/React.createElement("path", {
+      d: linePath(cyData, cutoff),
+      fill: "none",
+      stroke: CY_COLOR,
+      strokeWidth: "2.5",
+      strokeLinecap: "round",
+      strokeLinejoin: "round"
+    }), MONTH_ABBR.map((mn, i) => /*#__PURE__*/React.createElement("g", {
+      key: mn
+    }, /*#__PURE__*/React.createElement("title", null, `${mn} · ${lyYear}: ${lyData[i]}${i < cutoff ? ` · ${cyYear}: ${cyData[i]}` : ""}`), /*#__PURE__*/React.createElement("rect", {
+      x: xAt(i) - W / 24,
+      y: 0,
+      width: W / 12,
+      height: H,
+      fill: "transparent"
+    }))))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        marginTop: 8
+      }
+    }, MONTH_ABBR.map((mn, i) => /*#__PURE__*/React.createElement("div", {
+      key: mn,
+      style: {
+        flex: 1,
+        textAlign: "center",
+        fontSize: 10,
+        fontFamily: "'Barlow', sans-serif",
+        color: R.shale,
+        opacity: i >= cutoff ? 0.45 : 1,
+        lineHeight: 1.1
+      }
+    }, mn)))));
   })(), /*#__PURE__*/React.createElement("div", {
     style: {
       background: R.surface,
