@@ -3452,78 +3452,145 @@ const CreativeProduction = ({
     const total = monthCs.length;
     const insights = [];
 
-    // Rule 1 — Top campaign always (if any data).
+    // ── Aggregations: per-campaign counts/breakdowns + per-category counts/format mix ──
     const campCounts = {};
+    const campByCat = {};
+    const campByFmt = {};
+    const catCounts = {};
+    const catByFmt = {};
     monthCs.forEach(c => {
       const camp = (c.campaign == null ? "" : String(c.campaign)).trim() || "—";
       campCounts[camp] = (campCounts[camp] || 0) + 1;
+      if (!campByCat[camp]) campByCat[camp] = {};
+      campByCat[camp][c.category] = (campByCat[camp][c.category] || 0) + 1;
+      if (!campByFmt[camp]) campByFmt[camp] = {
+        img: 0,
+        vid: 0
+      };
+      campByFmt[camp][c.format === "video" ? "vid" : "img"]++;
+      catCounts[c.category] = (catCounts[c.category] || 0) + 1;
+      if (!catByFmt[c.category]) catByFmt[c.category] = {
+        img: 0,
+        vid: 0
+      };
+      catByFmt[c.category][c.format === "video" ? "vid" : "img"]++;
     });
     const sortedCamps = Object.entries(campCounts).sort((a, b) => b[1] - a[1]);
+    const sortedCats = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+
+    // ── Insight 1: top campaign + dominant category + format mix ──
     if (total > 0 && sortedCamps.length > 0) {
       const [topCamp, topCount] = sortedCamps[0];
       const pct = Math.round(topCount / total * 100);
-      insights.push({
-        key: "top",
-        text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, topCamp), " drove ", /*#__PURE__*/React.createElement("strong", null, pct, "%"), " of output (", topCount, " ads).")
-      });
-    }
-
-    // Rule 2 — Top-3 concentration if ≥ 70%.
-    if (total > 0 && sortedCamps.length >= 3) {
-      const top3 = sortedCamps.slice(0, 3).reduce((s, [, n]) => s + n, 0);
-      const pct3 = Math.round(top3 / total * 100);
-      if (pct3 >= 70) {
+      const catsInCamp = Object.entries(campByCat[topCamp] || {}).sort((a, b) => b[1] - a[1]);
+      const f = campByFmt[topCamp] || {
+        img: 0,
+        vid: 0
+      };
+      if (catsInCamp.length > 0 && catsInCamp[0][1] / topCount >= 0.4) {
+        const [domCat] = catsInCamp[0];
         insights.push({
-          key: "conc",
-          text: /*#__PURE__*/React.createElement(React.Fragment, null, "Top 3 campaigns concentrate ", /*#__PURE__*/React.createElement("strong", null, pct3, "%"), " of volume.")
+          key: "top",
+          text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, topCamp), " drove ", /*#__PURE__*/React.createElement("strong", null, pct, "%"), " of output (", topCount, " ads), led by ", /*#__PURE__*/React.createElement("strong", null, domCat), " (", f.vid, " video \xB7 ", f.img, " image).")
+        });
+      } else {
+        insights.push({
+          key: "top",
+          text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, topCamp), " drove ", /*#__PURE__*/React.createElement("strong", null, pct, "%"), " of output (", topCount, " ads \u2014 ", f.vid, " video \xB7 ", f.img, " image).")
         });
       }
     }
 
-    // Rule 3 — Format anomaly: any category with majority video.
-    const catBuckets = {};
-    monthCs.forEach(c => {
-      if (!catBuckets[c.category]) catBuckets[c.category] = {
-        img: 0,
-        vid: 0
-      };
-      catBuckets[c.category][c.format === "video" ? "vid" : "img"]++;
-    });
-    const catVidArr = Object.entries(catBuckets).map(([cat, v]) => ({
-      cat,
-      vidPct: v.img + v.vid > 0 ? v.vid / (v.img + v.vid) : 0,
-      t: v.img + v.vid
-    })).filter(c => c.t >= 5).sort((a, b) => b.vidPct - a.vidPct);
-    const videoLeader = catVidArr.find(c => c.vidPct > 0.5);
-    if (videoLeader) {
-      insights.push({
-        key: "fmt",
-        text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, videoLeader.cat), " skews video (", Math.round(videoLeader.vidPct * 100), "%) \u2014 only category with majority video.")
-      });
-    }
-
-    // Rule 4 — Total volume YoY delta if |Δ| ≥ 20%.
+    // ── Insight 2: total YoY with category drivers ──
     const _selMN = selectedMonth.split(" '")[0] || "";
     const _selYY2 = selectedMonth.split(" '")[1] || "";
     const _prevYY2 = _selYY2 ? String(parseInt(_selYY2, 10) - 1).padStart(2, "0") : "";
     const _prevML = _selMN && _prevYY2 ? `${_selMN} '${_prevYY2}` : null;
     if (total > 0 && _prevML) {
-      const prevTotal = creatives.filter(c => c.month === _prevML && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter) && (!nleOnly || c.campaign === "NLE")).length;
+      const prevCs = creatives.filter(c => c.month === _prevML && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter) && (!nleOnly || c.campaign === "NLE"));
+      const prevTotal = prevCs.length;
       if (prevTotal > 0) {
         const pct = Math.round((total - prevTotal) / prevTotal * 100);
-        if (Math.abs(pct) >= 20) {
+        if (Math.abs(pct) >= 15) {
           const up = pct > 0;
+          // Find the categories driving the change in the same direction
+          const prevByCat = {};
+          prevCs.forEach(c => {
+            prevByCat[c.category] = (prevByCat[c.category] || 0) + 1;
+          });
+          const catDeltas = Object.entries(catCounts).map(([cat, curr]) => {
+            const prev = prevByCat[cat] || 0;
+            const dPct = prev > 0 ? Math.round((curr - prev) / prev * 100) : null;
+            return {
+              cat,
+              curr,
+              prev,
+              abs: curr - prev,
+              pct: dPct
+            };
+          }).filter(d => d.pct != null && (up ? d.abs > 0 : d.abs < 0)).sort((a, b) => Math.abs(b.abs) - Math.abs(a.abs)).slice(0, 2);
+          const driverPart = catDeltas.length > 0 ? `, driven by ${catDeltas.map(d => `${d.cat} (${d.pct >= 0 ? "+" : ""}${d.pct}%)`).join(" and ")}` : "";
           insights.push({
             key: "yoy",
             text: /*#__PURE__*/React.createElement(React.Fragment, null, "Total volume ", /*#__PURE__*/React.createElement("strong", {
               style: {
                 color: up ? R.positive : R.negative
               }
-            }, up ? "+" : "", pct, "%"), " YoY vs ", _prevML, " (", prevTotal, " ads).")
+            }, up ? "+" : "", pct, "%"), " YoY vs ", _prevML, " (", prevTotal, " ads)", driverPart, ".")
           });
         }
       }
     }
+
+    // ── Insight 3: format anomaly — single video-leader category ──
+    const catVidArr = Object.entries(catByFmt).map(([cat, v]) => ({
+      cat,
+      vidPct: v.img + v.vid > 0 ? v.vid / (v.img + v.vid) : 0,
+      t: v.img + v.vid
+    })).filter(c => c.t >= 5);
+    const videoLeaders = catVidArr.filter(c => c.vidPct > 0.5);
+    if (videoLeaders.length === 1 && catVidArr.length >= 2) {
+      const v = videoLeaders[0];
+      insights.push({
+        key: "fmt",
+        text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, v.cat), " skews video (", Math.round(v.vidPct * 100), "%) \u2014 the only category where video beats image this month.")
+      });
+    }
+
+    // ── Insight 4: top category share + format flavor (when ≥ 30%) ──
+    if (total > 0 && sortedCats.length > 0) {
+      const [topCat, topCatCount] = sortedCats[0];
+      const catPct = Math.round(topCatCount / total * 100);
+      if (catPct >= 30) {
+        const f = catByFmt[topCat] || {
+          img: 0,
+          vid: 0
+        };
+        const ft = f.img + f.vid;
+        const imgShare = ft > 0 ? Math.round(f.img / ft * 100) : 0;
+        const fmtTail = imgShare > 65 ? `, mostly image (${imgShare}%)` : imgShare < 35 ? `, mostly video (${100 - imgShare}%)` : "";
+        insights.push({
+          key: "topcat",
+          text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, topCat), " leads with ", topCatCount, " ads (", catPct, "% of output", fmtTail, ").")
+        });
+      }
+    }
+
+    // ── Insight 5: concentration (only if ≥ 75% and we have room) ──
+    if (insights.length < 4 && total > 0 && sortedCamps.length >= 3) {
+      const top3 = sortedCamps.slice(0, 3).reduce((s, [, n]) => s + n, 0);
+      const pct3 = Math.round(top3 / total * 100);
+      if (pct3 >= 75) {
+        const names = sortedCamps.slice(0, 3).map(([k]) => k).join(", ");
+        insights.push({
+          key: "conc",
+          text: /*#__PURE__*/React.createElement(React.Fragment, null, "Top 3 campaigns (", names, ") account for ", /*#__PURE__*/React.createElement("strong", null, pct3, "%"), " of volume.")
+        });
+      }
+    }
+
+    // Cap at 4 insights
+    const finalInsights = insights.slice(0, 4);
     return /*#__PURE__*/React.createElement("div", {
       style: {
         background: R.surface,
@@ -3554,7 +3621,7 @@ const CreativeProduction = ({
         marginBottom: 6,
         fontFamily: "'Barlow', sans-serif"
       }
-    }, "Auto-detected"), insights.length > 0 ? /*#__PURE__*/React.createElement("ul", {
+    }, "Auto-detected"), finalInsights.length > 0 ? /*#__PURE__*/React.createElement("ul", {
       style: {
         margin: "0 0 14px",
         paddingLeft: 16,
@@ -3563,7 +3630,7 @@ const CreativeProduction = ({
         lineHeight: 1.55,
         fontFamily: "'Barlow', sans-serif"
       }
-    }, insights.map(ins => /*#__PURE__*/React.createElement("li", {
+    }, finalInsights.map(ins => /*#__PURE__*/React.createElement("li", {
       key: ins.key,
       style: {
         marginBottom: 5
@@ -3589,7 +3656,7 @@ const CreativeProduction = ({
     }, "Internal notes"), /*#__PURE__*/React.createElement("textarea", {
       value: notes,
       onChange: e => saveNotes(e.target.value),
-      placeholder: "Notas del equipo sobre este mes...",
+      placeholder: "Add internal notes about this month\u2026",
       style: {
         flex: 1,
         minHeight: 70,
