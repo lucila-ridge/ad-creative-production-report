@@ -2235,6 +2235,26 @@ const CreativeProduction = ({
   const [formatView, setFormatView] = useState("total"); // "total" | "split"
   const [chartView, setChartView] = useState("format"); // "format" (stacked img/vid) | "category" (stacked by category)
   const [annualView, setAnnualView] = useState("category"); // Annual Output toggle: "category" | "campaign"
+  const [yoyHover, setYoyHover] = useState(null); // YoY chart: hovered month index (0-11) or null
+  const [pieHover, setPieHover] = useState(null); // Pie chart: { idx, x, y } relative to card, or null
+  // Internal notes — persisted in localStorage keyed by selectedMonth, scoped to Tab 02.
+  const [notes, setNotes] = useState("");
+  useEffect(() => {
+    if (typeof window === "undefined" || !selectedMonth) return;
+    try {
+      const key = `ridge-notes:s2:${selectedMonth}`;
+      setNotes(window.localStorage.getItem(key) || "");
+    } catch (e) {
+      setNotes("");
+    }
+  }, [selectedMonth]);
+  const saveNotes = val => {
+    setNotes(val);
+    try {
+      const key = `ridge-notes:s2:${selectedMonth}`;
+      window.localStorage.setItem(key, val);
+    } catch (e) {}
+  };
 
   // Live creatives are already normalized — give them the legacy shape this component
   // still expects (categories[] coming from the row's category field).
@@ -2648,7 +2668,8 @@ const CreativeProduction = ({
     const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(t * yMax));
     const W = 600,
       H = 220;
-    const xAt = i => i / 11 * W;
+    // Centered in each month column so points align with X labels (Jan-Dec).
+    const xAt = i => (i + 0.5) / 12 * W;
     const yAt = v => H - v / yMax * H;
     const linePath = (arr, end) => {
       if (end <= 0) return "";
@@ -2669,6 +2690,9 @@ const CreativeProduction = ({
     };
     const LY_COLOR = "#B8B4AA";
     const CY_COLOR = "#C45220";
+
+    // Long-form month name + year for the hover tooltip.
+    const _MONTH_FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     return /*#__PURE__*/React.createElement("div", {
       style: {
         background: R.surface,
@@ -2727,7 +2751,8 @@ const CreativeProduction = ({
       style: {
         position: "relative",
         height: H
-      }
+      },
+      onMouseLeave: () => setYoyHover(null)
     }, yTicks.map((v, idx) => {
       const t = idx / 4;
       return /*#__PURE__*/React.createElement("div", {
@@ -2777,7 +2802,8 @@ const CreativeProduction = ({
       stroke: LY_COLOR,
       strokeWidth: "2",
       strokeLinecap: "round",
-      strokeLinejoin: "round"
+      strokeLinejoin: "round",
+      vectorEffect: "non-scaling-stroke"
     }), cutoff > 0 && /*#__PURE__*/React.createElement("path", {
       d: areaPath(cyData, cutoff),
       fill: CY_COLOR + "33"
@@ -2787,16 +2813,161 @@ const CreativeProduction = ({
       stroke: CY_COLOR,
       strokeWidth: "2.5",
       strokeLinecap: "round",
-      strokeLinejoin: "round"
-    }), MONTH_ABBR.map((mn, i) => /*#__PURE__*/React.createElement("g", {
-      key: mn
-    }, /*#__PURE__*/React.createElement("title", null, `${mn} · ${lyYear}: ${lyData[i]}${i < cutoff ? ` · ${cyYear}: ${cyData[i]}` : ""}`), /*#__PURE__*/React.createElement("rect", {
-      x: xAt(i) - W / 24,
+      strokeLinejoin: "round",
+      vectorEffect: "non-scaling-stroke"
+    }), yoyHover != null && /*#__PURE__*/React.createElement("g", {
+      pointerEvents: "none"
+    }, /*#__PURE__*/React.createElement("line", {
+      x1: xAt(yoyHover),
+      x2: xAt(yoyHover),
+      y1: 0,
+      y2: H,
+      stroke: R.text,
+      strokeWidth: "1",
+      strokeDasharray: "3 3",
+      vectorEffect: "non-scaling-stroke",
+      opacity: "0.55"
+    }), /*#__PURE__*/React.createElement("circle", {
+      cx: xAt(yoyHover),
+      cy: yAt(lyData[yoyHover]),
+      r: "4",
+      fill: "#FFF",
+      stroke: LY_COLOR,
+      strokeWidth: "2",
+      vectorEffect: "non-scaling-stroke"
+    }), yoyHover < cutoff && /*#__PURE__*/React.createElement("circle", {
+      cx: xAt(yoyHover),
+      cy: yAt(cyData[yoyHover]),
+      r: "4",
+      fill: "#FFF",
+      stroke: CY_COLOR,
+      strokeWidth: "2",
+      vectorEffect: "non-scaling-stroke"
+    })), MONTH_ABBR.map((mn, i) => /*#__PURE__*/React.createElement("rect", {
+      key: mn,
+      x: i / 12 * W,
       y: 0,
       width: W / 12,
       height: H,
-      fill: "transparent"
-    }))))), /*#__PURE__*/React.createElement("div", {
+      fill: "transparent",
+      style: {
+        cursor: "crosshair"
+      },
+      onMouseEnter: () => setYoyHover(i)
+    }))), yoyHover != null && (() => {
+      const i = yoyHover;
+      const monthFull = _MONTH_FULL[i] || MONTH_ABBR[i];
+      const ly = lyData[i] || 0;
+      const cy = i < cutoff ? cyData[i] : null;
+      let deltaPct = null;
+      if (cy != null && ly > 0) deltaPct = (cy - ly) / ly * 100;
+      const fmtDeltaPct = p => {
+        const a = Math.abs(p);
+        if (a >= 100) return Math.round(a) + "";
+        if (Math.round(a * 10) % 10 === 0) return Math.round(a) + "";
+        return a.toFixed(1);
+      };
+      // Position tooltip near the column, clamped to [0, W] in viewport units.
+      const colCenterPct = (i + 0.5) / 12 * 100; // % across the chart width
+      const onLeftSide = colCenterPct > 60;
+      return /*#__PURE__*/React.createElement("div", {
+        style: {
+          position: "absolute",
+          left: onLeftSide ? "auto" : `calc(${colCenterPct}% + 10px)`,
+          right: onLeftSide ? `calc(${100 - colCenterPct}% + 10px)` : "auto",
+          top: 0,
+          background: "#FFFFFF",
+          border: `1px solid ${R.border}`,
+          borderLeft: `3px solid ${R.rust}`,
+          borderRadius: 6,
+          padding: "8px 11px",
+          fontFamily: "'Barlow', sans-serif",
+          fontSize: 11,
+          minWidth: 150,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
+          pointerEvents: "none",
+          zIndex: 5
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontWeight: 700,
+          color: R.black,
+          fontSize: 13,
+          marginBottom: 6
+        }
+      }, monthFull), /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
+          gap: "4px 12px",
+          lineHeight: 1.6
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: R.shale
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          display: "inline-block",
+          width: 10,
+          height: 2,
+          background: LY_COLOR,
+          verticalAlign: "middle",
+          marginRight: 6
+        }
+      }), lyYear), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontWeight: 700,
+          color: R.black,
+          textAlign: "right"
+        }
+      }, ly.toLocaleString()), /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: R.shale
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          display: "inline-block",
+          width: 10,
+          height: 2,
+          background: CY_COLOR,
+          verticalAlign: "middle",
+          marginRight: 6
+        }
+      }), cyYear), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontWeight: 700,
+          color: R.black,
+          textAlign: "right"
+        }
+      }, cy != null ? cy.toLocaleString() : "—")), deltaPct != null && /*#__PURE__*/React.createElement("div", {
+        style: {
+          marginTop: 6,
+          paddingTop: 6,
+          borderTop: `0.5px solid ${R.border}`,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: R.shale,
+          fontSize: 11
+        }
+      }, "YoY"), /*#__PURE__*/React.createElement("span", {
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "2px 8px",
+          borderRadius: 999,
+          background: deltaPct >= 0 ? "#E6F4EA" : "#FCE8E6",
+          color: deltaPct >= 0 ? R.positive : R.negative,
+          fontSize: 10,
+          fontWeight: 700,
+          whiteSpace: "nowrap"
+        }
+      }, deltaPct >= 0 ? "+" : "-", fmtDeltaPct(deltaPct), "% YoY")));
+    })()), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         marginTop: 8
@@ -2808,7 +2979,8 @@ const CreativeProduction = ({
         textAlign: "center",
         fontSize: 10,
         fontFamily: "'Barlow', sans-serif",
-        color: R.shale,
+        color: yoyHover === i ? R.black : R.shale,
+        fontWeight: yoyHover === i ? 700 : 400,
         opacity: i >= cutoff ? 0.45 : 1,
         lineHeight: 1.1
       }
@@ -2816,7 +2988,7 @@ const CreativeProduction = ({
   })()), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "3fr 2fr",
+      gridTemplateColumns: "1fr 1fr 1fr",
       gap: 12,
       marginBottom: 24
     }
@@ -2831,12 +3003,31 @@ const CreativeProduction = ({
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const TOP_N = 5;
     const top = sorted.slice(0, TOP_N);
-    const otherCount = sorted.slice(TOP_N).reduce((s, [, n]) => s + n, 0);
+    const otherEntries = sorted.slice(TOP_N);
+    const otherKeys = new Set(otherEntries.map(([k]) => k));
+    const otherCount = otherEntries.reduce((s, [, n]) => s + n, 0);
     const slices = otherCount > 0 ? [...top, ["Other", otherCount]] : top;
+
+    // Prev-year same month, respecting all active filters — used for the YoY pill in the tooltip.
+    const _selMonthName = selectedMonth.split(" '")[0] || "";
+    const _selYY = selectedMonth.split(" '")[1] || "";
+    const _prevYY = _selYY ? String(parseInt(_selYY, 10) - 1).padStart(2, "0") : "";
+    const _prevMonthLabel = _selMonthName && _prevYY ? `${_selMonthName} '${_prevYY}` : null;
+    const prevCounts = {};
+    if (_prevMonthLabel) {
+      creatives.forEach(c => {
+        if (c.month !== _prevMonthLabel) return;
+        if (catFilter.length > 0 && !catFilter.includes(c.category)) return;
+        if (fmtFilter !== "all" && c.format !== fmtFilter) return;
+        if (nleOnly && c.campaign !== "NLE") return;
+        const camp = (c.campaign == null ? "" : String(c.campaign)).trim() || "—";
+        prevCounts[camp] = (prevCounts[camp] || 0) + 1;
+      });
+    }
     const PIE_PALETTE = ["#5B7FA6", "#8E73B5", "#C18A48", "#6F9A77", "#B96B5A", "#4A5240"];
     const VIEWBOX = 200;
-    const cx = VIEWBOX / 2;
-    const cy = VIEWBOX / 2;
+    const cxC = VIEWBOX / 2;
+    const cyC = VIEWBOX / 2;
     const R_OUTER = 80;
     const R_INNER = 48;
     let cumAngle = -Math.PI / 2;
@@ -2845,23 +3036,31 @@ const CreativeProduction = ({
       const angleSpan = pct * 2 * Math.PI;
       const color = PIE_PALETTE[i % PIE_PALETTE.length];
       const pctRounded = Math.round(pct * 100);
-      const tooltip = `${camp}: ${count} ads (${pctRounded}%)`;
+      // Compute prev-year count for this slice (top campaigns by name; Other = sum of all keys that fell into Other)
+      let prev = 0;
+      if (camp === "Other") {
+        otherKeys.forEach(k => {
+          prev += prevCounts[k] || 0;
+        });
+      } else {
+        prev = prevCounts[camp] || 0;
+      }
       let d;
       if (slices.length === 1) {
-        d = `M ${cx + R_OUTER} ${cy} A ${R_OUTER} ${R_OUTER} 0 1 1 ${cx - R_OUTER} ${cy} A ${R_OUTER} ${R_OUTER} 0 1 1 ${cx + R_OUTER} ${cy} Z M ${cx + R_INNER} ${cy} A ${R_INNER} ${R_INNER} 0 1 0 ${cx - R_INNER} ${cy} A ${R_INNER} ${R_INNER} 0 1 0 ${cx + R_INNER} ${cy} Z`;
+        d = `M ${cxC + R_OUTER} ${cyC} A ${R_OUTER} ${R_OUTER} 0 1 1 ${cxC - R_OUTER} ${cyC} A ${R_OUTER} ${R_OUTER} 0 1 1 ${cxC + R_OUTER} ${cyC} Z M ${cxC + R_INNER} ${cyC} A ${R_INNER} ${R_INNER} 0 1 0 ${cxC - R_INNER} ${cyC} A ${R_INNER} ${R_INNER} 0 1 0 ${cxC + R_INNER} ${cyC} Z`;
       } else {
         const startAngle = cumAngle;
         const endAngle = cumAngle + angleSpan;
         cumAngle = endAngle;
         const largeArc = angleSpan > Math.PI ? 1 : 0;
-        const x1 = cx + R_OUTER * Math.cos(startAngle);
-        const y1 = cy + R_OUTER * Math.sin(startAngle);
-        const x2 = cx + R_OUTER * Math.cos(endAngle);
-        const y2 = cy + R_OUTER * Math.sin(endAngle);
-        const x3 = cx + R_INNER * Math.cos(endAngle);
-        const y3 = cy + R_INNER * Math.sin(endAngle);
-        const x4 = cx + R_INNER * Math.cos(startAngle);
-        const y4 = cy + R_INNER * Math.sin(startAngle);
+        const x1 = cxC + R_OUTER * Math.cos(startAngle);
+        const y1 = cyC + R_OUTER * Math.sin(startAngle);
+        const x2 = cxC + R_OUTER * Math.cos(endAngle);
+        const y2 = cyC + R_OUTER * Math.sin(endAngle);
+        const x3 = cxC + R_INNER * Math.cos(endAngle);
+        const y3 = cyC + R_INNER * Math.sin(endAngle);
+        const x4 = cxC + R_INNER * Math.cos(startAngle);
+        const y4 = cyC + R_INNER * Math.sin(startAngle);
         d = `M ${x1} ${y1} A ${R_OUTER} ${R_OUTER} 0 ${largeArc} 1 ${x2} ${y2} L ${x3} ${y3} A ${R_INNER} ${R_INNER} 0 ${largeArc} 0 ${x4} ${y4} Z`;
       }
       return {
@@ -2870,9 +3069,17 @@ const CreativeProduction = ({
         camp,
         count,
         pct: pctRounded,
-        tooltip
+        prev
       };
     });
+
+    // Helper for the YoY pill formatting
+    const fmtPct = p => {
+      const a = Math.abs(p);
+      if (a >= 100) return Math.round(a) + "";
+      if (Math.round(a * 10) % 10 === 0) return Math.round(a) + "";
+      return a.toFixed(1);
+    };
     return /*#__PURE__*/React.createElement("div", {
       style: {
         background: R.surface,
@@ -2892,7 +3099,7 @@ const CreativeProduction = ({
         fontFamily: "'Barlow', sans-serif",
         marginBottom: 2
       }
-    }, "Ads by Campaign"), /*#__PURE__*/React.createElement("div", {
+    }, "Ad Volume by Campaign"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 13,
         color: R.shale,
@@ -2906,19 +3113,17 @@ const CreativeProduction = ({
         fontFamily: "'Barlow', sans-serif",
         fontSize: 13
       }
-    }, "No data for ", selectedMonth, nleOnly ? " (NLE only filter active)" : "", ".") : /*#__PURE__*/React.createElement("div", {
+    }, "No data for ", selectedMonth, nleOnly ? " (NLE only filter active)" : "", ".") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: 16,
-        alignItems: "center",
-        marginTop: 8
-      }
+        position: "relative",
+        padding: "8px 8px 0"
+      },
+      onMouseLeave: () => setPieHover(null)
     }, /*#__PURE__*/React.createElement("svg", {
       viewBox: `0 0 ${VIEWBOX} ${VIEWBOX}`,
       style: {
         width: "100%",
-        maxWidth: 220,
+        maxWidth: 200,
         display: "block",
         margin: "0 auto"
       }
@@ -2927,10 +3132,39 @@ const CreativeProduction = ({
       d: s.d,
       fill: s.color,
       stroke: R.surface,
-      strokeWidth: 1
-    }, /*#__PURE__*/React.createElement("title", null, s.tooltip))), /*#__PURE__*/React.createElement("text", {
-      x: cx,
-      y: cy - 4,
+      strokeWidth: 1,
+      style: {
+        cursor: "pointer",
+        transition: "opacity 0.12s",
+        opacity: pieHover && pieHover.idx !== i ? 0.55 : 1
+      },
+      onMouseEnter: e => {
+        const wrap = e.currentTarget.closest("div");
+        const rect = wrap ? wrap.getBoundingClientRect() : {
+          left: 0,
+          top: 0
+        };
+        setPieHover({
+          idx: i,
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      },
+      onMouseMove: e => {
+        const wrap = e.currentTarget.closest("div");
+        const rect = wrap ? wrap.getBoundingClientRect() : {
+          left: 0,
+          top: 0
+        };
+        setPieHover({
+          idx: i,
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      }
+    })), /*#__PURE__*/React.createElement("text", {
+      x: cxC,
+      y: cyC - 4,
       textAnchor: "middle",
       style: {
         fontSize: 22,
@@ -2939,8 +3173,8 @@ const CreativeProduction = ({
         fill: R.black
       }
     }, total), /*#__PURE__*/React.createElement("text", {
-      x: cx,
-      y: cy + 14,
+      x: cxC,
+      y: cyC + 14,
       textAnchor: "middle",
       style: {
         fontSize: 9,
@@ -2949,55 +3183,141 @@ const CreativeProduction = ({
         textTransform: "uppercase",
         letterSpacing: "0.06em"
       }
-    }, "total ads")), /*#__PURE__*/React.createElement("div", {
+    }, "total ads")), pieHover && pieHover.idx != null && sliceData[pieHover.idx] && (() => {
+      const s = sliceData[pieHover.idx];
+      const hasPrev = s.prev > 0;
+      const deltaPct = hasPrev ? (s.count - s.prev) / s.prev * 100 : null;
+      const TT_W = 160;
+      const TT_H = hasPrev ? 110 : 78;
+      let left = pieHover.x + 12;
+      let top = pieHover.y - TT_H - 8;
+      // Best-effort clamping; the wrap is ~ column width, not exact.
+      if (left + TT_W > 360) left = pieHover.x - TT_W - 12;
+      if (left < 0) left = 4;
+      if (top < 0) top = pieHover.y + 12;
+      return /*#__PURE__*/React.createElement("div", {
+        style: {
+          position: "absolute",
+          left,
+          top,
+          background: "#FFFFFF",
+          border: `1px solid ${R.border}`,
+          borderLeft: `3px solid ${R.rust}`,
+          borderRadius: 6,
+          padding: "9px 11px",
+          fontFamily: "'Barlow', sans-serif",
+          fontSize: 11,
+          minWidth: TT_W,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
+          pointerEvents: "none",
+          zIndex: 5
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontWeight: 700,
+          color: R.black,
+          fontSize: 12,
+          marginBottom: 6
+        }
+      }, s.camp), /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "flex",
+          justifyContent: "space-between",
+          lineHeight: 1.6
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: R.shale
+        }
+      }, "ads"), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontWeight: 700,
+          color: R.black
+        }
+      }, s.count)), /*#__PURE__*/React.createElement("div", {
+        style: {
+          display: "flex",
+          justifyContent: "space-between",
+          lineHeight: 1.6
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: R.shale
+        }
+      }, "share"), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontWeight: 700,
+          color: R.black
+        }
+      }, s.pct, "%")), hasPrev && /*#__PURE__*/React.createElement("div", {
+        style: {
+          marginTop: 6,
+          paddingTop: 6,
+          borderTop: `0.5px solid ${R.border}`,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: R.shale,
+          fontSize: 11
+        }
+      }, "vs ", _prevMonthLabel), /*#__PURE__*/React.createElement("span", {
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "2px 8px",
+          borderRadius: 999,
+          background: deltaPct >= 0 ? "#E6F4EA" : "#FCE8E6",
+          color: deltaPct >= 0 ? R.positive : R.negative,
+          fontSize: 10,
+          fontWeight: 700,
+          whiteSpace: "nowrap"
+        }
+      }, deltaPct >= 0 ? "+" : "-", fmtPct(deltaPct), "% YoY")));
+    })()), /*#__PURE__*/React.createElement("div", {
       style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: 8
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: "6px 12px",
+        marginTop: 14,
+        paddingTop: 12,
+        borderTop: `0.5px solid ${R.border}`
       }
     }, sliceData.map((s, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
-      title: s.tooltip,
       style: {
         display: "flex",
         alignItems: "center",
-        gap: 8
+        gap: 6,
+        fontSize: 11
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", {
       style: {
-        width: 12,
-        height: 12,
+        width: 9,
+        height: 9,
         borderRadius: 2,
         background: s.color,
         flexShrink: 0
       }
     }), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 13,
-        color: R.black,
+        flex: 1,
+        color: s.camp === "Other" ? R.shale : R.black,
         fontFamily: "'Barlow', sans-serif",
         fontWeight: 600,
-        flex: 1,
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
     }, s.camp), /*#__PURE__*/React.createElement("span", {
       style: {
-        fontSize: 13,
-        color: R.black,
         fontFamily: "'Barlow', sans-serif",
-        fontWeight: 700
+        fontWeight: 700,
+        color: R.black
       }
-    }, s.count), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 11,
-        color: R.shale,
-        fontFamily: "'Barlow', sans-serif",
-        minWidth: 32,
-        textAlign: "right"
-      }
-    }, s.pct, "%"))))));
+    }, s.count))))));
   })(), /*#__PURE__*/React.createElement("div", {
     style: {
       background: R.surface,
@@ -3127,7 +3447,175 @@ const CreativeProduction = ({
       color: R.shale,
       fontFamily: "'Barlow', sans-serif"
     }
-  }, l)))))), (() => {
+  }, l))))), (() => {
+    const monthCs = creatives.filter(c => c.month === selectedMonth && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter) && (!nleOnly || c.campaign === "NLE"));
+    const total = monthCs.length;
+    const insights = [];
+
+    // Rule 1 — Top campaign always (if any data).
+    const campCounts = {};
+    monthCs.forEach(c => {
+      const camp = (c.campaign == null ? "" : String(c.campaign)).trim() || "—";
+      campCounts[camp] = (campCounts[camp] || 0) + 1;
+    });
+    const sortedCamps = Object.entries(campCounts).sort((a, b) => b[1] - a[1]);
+    if (total > 0 && sortedCamps.length > 0) {
+      const [topCamp, topCount] = sortedCamps[0];
+      const pct = Math.round(topCount / total * 100);
+      insights.push({
+        key: "top",
+        text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, topCamp), " drove ", /*#__PURE__*/React.createElement("strong", null, pct, "%"), " of output (", topCount, " ads).")
+      });
+    }
+
+    // Rule 2 — Top-3 concentration if ≥ 70%.
+    if (total > 0 && sortedCamps.length >= 3) {
+      const top3 = sortedCamps.slice(0, 3).reduce((s, [, n]) => s + n, 0);
+      const pct3 = Math.round(top3 / total * 100);
+      if (pct3 >= 70) {
+        insights.push({
+          key: "conc",
+          text: /*#__PURE__*/React.createElement(React.Fragment, null, "Top 3 campaigns concentrate ", /*#__PURE__*/React.createElement("strong", null, pct3, "%"), " of volume.")
+        });
+      }
+    }
+
+    // Rule 3 — Format anomaly: any category with majority video.
+    const catBuckets = {};
+    monthCs.forEach(c => {
+      if (!catBuckets[c.category]) catBuckets[c.category] = {
+        img: 0,
+        vid: 0
+      };
+      catBuckets[c.category][c.format === "video" ? "vid" : "img"]++;
+    });
+    const catVidArr = Object.entries(catBuckets).map(([cat, v]) => ({
+      cat,
+      vidPct: v.img + v.vid > 0 ? v.vid / (v.img + v.vid) : 0,
+      t: v.img + v.vid
+    })).filter(c => c.t >= 5).sort((a, b) => b.vidPct - a.vidPct);
+    const videoLeader = catVidArr.find(c => c.vidPct > 0.5);
+    if (videoLeader) {
+      insights.push({
+        key: "fmt",
+        text: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("strong", null, videoLeader.cat), " skews video (", Math.round(videoLeader.vidPct * 100), "%) \u2014 only category with majority video.")
+      });
+    }
+
+    // Rule 4 — Total volume YoY delta if |Δ| ≥ 20%.
+    const _selMN = selectedMonth.split(" '")[0] || "";
+    const _selYY2 = selectedMonth.split(" '")[1] || "";
+    const _prevYY2 = _selYY2 ? String(parseInt(_selYY2, 10) - 1).padStart(2, "0") : "";
+    const _prevML = _selMN && _prevYY2 ? `${_selMN} '${_prevYY2}` : null;
+    if (total > 0 && _prevML) {
+      const prevTotal = creatives.filter(c => c.month === _prevML && (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter) && (!nleOnly || c.campaign === "NLE")).length;
+      if (prevTotal > 0) {
+        const pct = Math.round((total - prevTotal) / prevTotal * 100);
+        if (Math.abs(pct) >= 20) {
+          const up = pct > 0;
+          insights.push({
+            key: "yoy",
+            text: /*#__PURE__*/React.createElement(React.Fragment, null, "Total volume ", /*#__PURE__*/React.createElement("strong", {
+              style: {
+                color: up ? R.positive : R.negative
+              }
+            }, up ? "+" : "", pct, "%"), " YoY vs ", _prevML, " (", prevTotal, " ads).")
+          });
+        }
+      }
+    }
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: R.surface,
+        borderRadius: 8,
+        border: `1px solid ${R.border}`,
+        borderLeft: `3px solid ${R.rust}`,
+        padding: "20px 22px",
+        display: "flex",
+        flexDirection: "column"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: R.shale,
+        fontFamily: "'Barlow', sans-serif",
+        textTransform: "uppercase",
+        letterSpacing: "0.07em",
+        marginBottom: 10,
+        fontWeight: 600
+      }
+    }, "Monthly Insight"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: R.rust,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        fontWeight: 700,
+        marginBottom: 6,
+        fontFamily: "'Barlow', sans-serif"
+      }
+    }, "Auto-detected"), insights.length > 0 ? /*#__PURE__*/React.createElement("ul", {
+      style: {
+        margin: "0 0 14px",
+        paddingLeft: 16,
+        fontSize: 12,
+        color: R.text,
+        lineHeight: 1.55,
+        fontFamily: "'Barlow', sans-serif"
+      }
+    }, insights.map(ins => /*#__PURE__*/React.createElement("li", {
+      key: ins.key,
+      style: {
+        marginBottom: 5
+      }
+    }, ins.text))) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginBottom: 14,
+        fontSize: 12,
+        color: R.shale,
+        fontStyle: "italic",
+        fontFamily: "'Barlow', sans-serif"
+      }
+    }, "No notable patterns this month."), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: R.shale,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        fontWeight: 700,
+        marginBottom: 6,
+        fontFamily: "'Barlow', sans-serif"
+      }
+    }, "Internal notes"), /*#__PURE__*/React.createElement("textarea", {
+      value: notes,
+      onChange: e => saveNotes(e.target.value),
+      placeholder: "Notas del equipo sobre este mes...",
+      style: {
+        flex: 1,
+        minHeight: 70,
+        resize: "vertical",
+        border: `0.5px solid ${R.border}`,
+        borderRadius: 4,
+        padding: "8px 10px",
+        fontFamily: "'Barlow', sans-serif",
+        fontSize: 12,
+        color: R.text,
+        lineHeight: 1.5,
+        outline: "none",
+        background: "#FAFAF7",
+        width: "100%",
+        boxSizing: "border-box"
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 9,
+        color: R.shale,
+        marginTop: 4,
+        textAlign: "right",
+        fontFamily: "'Barlow', sans-serif"
+      }
+    }, "saved per month \xB7 localStorage"));
+  })()), (() => {
     const displayCats = catFilter.length > 0 ? catFilter : CATS;
     const matchesFilter = c => (catFilter.length === 0 || catFilter.includes(c.category)) && (fmtFilter === "all" || c.format === fmtFilter) && (!nleOnly || c.campaign === "NLE");
     const isCampaignView = annualView === "campaign";
@@ -3851,9 +4339,7 @@ const CreativeProduction = ({
     }), /*#__PURE__*/React.createElement(TotalRow, {
       months: tableView === "month" ? allMonths : ALL_QUARTERS.flatMap(q => q.months)
     })));
-  })(), /*#__PURE__*/React.createElement(InsightBox, {
-    label: "Monthly Insight"
-  }, totalVars, " variations produced across ", totalConcepts, " concepts (", varPerConcept, "x ratio) \u2014 ", imgCount, " image \xB7 ", vidCount, " video. Video share peaked in Aug '25 \u2014 the only month it beat image. Tech is the fastest growing category month-over-month."));
+  })());
 };
 
 // ─── SECTION 03: PARTNERSHIP CONTENT ─────────────────────────────────────────
